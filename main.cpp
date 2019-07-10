@@ -10,8 +10,8 @@
 #define PADDLE_HEIGHT       10
 #define PADDLE_BOTTOM_PAD   10
 
-#define BALL_SPEED      5
-#define BALL_SPEED_XMAX 4
+#define BALL_SPEED      6
+#define BALL_SPEED_XMAX 5
 
 #define BRICKS_ROWS     5
 #define BRICKS_COLUMNS  7
@@ -30,26 +30,6 @@ struct Ball
     float Vx, Vy;
 };
 
-static SDL_Rect Make_Paddle()
-{
-    SDL_Rect Paddle;
-    Paddle.x = 70;
-    Paddle.y = WIN_HEIGHT - PADDLE_BOTTOM_PAD - PADDLE_HEIGHT;
-    Paddle.w = PADDLE_WIDTH;
-    Paddle.h = PADDLE_HEIGHT;
-    return Paddle;
-}
-
-static bool Collide_AABB(int L1, int R1, int T1, int B1, int L2, int R2, int T2, int B2)
-{
-    return ((L2 < R1) && (L1 < R2)) && ((T2 < B1) && (T1 < B2));
-}
-
-static bool Collide_AABB(SDL_Rect A, SDL_Rect B)
-{
-    return Collide_AABB(A.x, A.x + A.w, A.y, A.y + A.h, B.x, B.x + B.w, B.y, B.y + B.h);
-}
-
 struct BrickParams
 {
     int Width, Height;
@@ -61,9 +41,37 @@ struct GameState
     bool IsGameOver;
     int NumLives;
 
+    Ball TheBall;
+    SDL_Rect ThePaddle;
+    SDL_Rect TheBricks[NUM_BRICKS];
+    bool IsBrickActive[NUM_BRICKS];
+
     bool IsDelaying;
     Uint32 LastDelayTick;
 };
+
+static Ball Make_Ball()
+{
+    Ball ABall;
+    ABall.X = WIN_WIDTH / 2;
+    ABall.Y = WIN_HEIGHT / 2;
+    ABall.W = 10;
+    ABall.H = 10;
+    ABall.Vx = 3;
+    ABall.Vy = 3;
+
+    return ABall;
+}
+
+static SDL_Rect Make_Paddle()
+{
+    SDL_Rect Paddle;
+    Paddle.x = 70;
+    Paddle.y = WIN_HEIGHT - PADDLE_BOTTOM_PAD - PADDLE_HEIGHT;
+    Paddle.w = PADDLE_WIDTH;
+    Paddle.h = PADDLE_HEIGHT;
+    return Paddle;
+}
 
 static BrickParams Calculate_BrickParams(int Width, int LPad, int NumCols)
 {
@@ -76,10 +84,28 @@ static BrickParams Calculate_BrickParams(int Width, int LPad, int NumCols)
     return Params;
 }
 
-static float Calculate_Bounce(const Ball &B, const SDL_Rect &Paddle)
+static void InitializeGameState(GameState &State)
 {
-    float Distance = (B.X + B.W/2) - (Paddle.x + Paddle.w/2);
-    return 2.0f * BALL_SPEED_XMAX / Paddle.w * Distance;
+    State.IsRunning = true;
+    State.IsGameOver = false;
+    State.NumLives = 3;
+    State.IsDelaying = false;
+
+    State.TheBall = Make_Ball();
+    State.ThePaddle = Make_Paddle();
+
+    BrickParams Params = Calculate_BrickParams(WIN_WIDTH, BRICKS_LEFTPAD, BRICKS_COLUMNS);
+    for(int i=0; i<NUM_BRICKS; i++)
+    {
+        State.IsBrickActive[i] = true;
+
+        int row = i / BRICKS_COLUMNS;
+        int col = i % BRICKS_COLUMNS;
+        State.TheBricks[i].x = BRICKS_LEFTPAD + col * (Params.Width + BRICKS_PAD);
+        State.TheBricks[i].y = BRICKS_TOPPAD + row * (Params.Height + BRICKS_PAD);
+        State.TheBricks[i].w = Params.Width;
+        State.TheBricks[i].h = Params.Height;
+    }
 }
 
 static bool NoBricksRemaining(bool *IsBrickActive)
@@ -89,22 +115,39 @@ static bool NoBricksRemaining(bool *IsBrickActive)
     return true;
 }
 
-static void Update(Ball &B, SDL_Rect &Paddle, float MouseX, SDL_Rect *TheBricks, bool *IsBrickActive, GameState &State)
+static bool Collide_AABB(int L1, int R1, int T1, int B1, int L2, int R2, int T2, int B2)
+{
+    return ((L2 < R1) && (L1 < R2)) && ((T2 < B1) && (T1 < B2));
+}
+
+static bool Collide_AABB(SDL_Rect A, SDL_Rect B)
+{
+    return Collide_AABB(A.x, A.x + A.w, A.y, A.y + A.h, B.x, B.x + B.w, B.y, B.y + B.h);
+}
+
+static float Calculate_Bounce(const Ball &B, const SDL_Rect &Paddle)
+{
+    float Distance = (B.X + B.W/2) - (Paddle.x + Paddle.w/2);
+    return 2.0f * BALL_SPEED_XMAX / Paddle.w * Distance;
+}
+
+static void Update(GameState &State, float MouseX)
 {
     if (State.NumLives == 0)
     {
         State.IsGameOver = true;
+        std::cout << "Game Over!" << std::endl;
         return;
     }
 
-    if (NoBricksRemaining(IsBrickActive))
+    if (NoBricksRemaining(State.IsBrickActive))
     {
         State.IsGameOver = true;
         std::cout << "You Win!" << std::endl;
         return;
     }
 
-    Paddle.x = MouseX - PADDLE_WIDTH / 2;
+    State.ThePaddle.x = MouseX - PADDLE_WIDTH / 2;
 
     if (State.IsDelaying)
     {
@@ -119,63 +162,68 @@ static void Update(Ball &B, SDL_Rect &Paddle, float MouseX, SDL_Rect *TheBricks,
     }
     
     // Collision with paddle
-    SDL_Rect BallRect = { B.X, B.Y, B.W, B.H };
-    if (Collide_AABB(BallRect, Paddle))
+    SDL_Rect BallRect = { 
+        State.TheBall.X, 
+        State.TheBall.Y, 
+        State.TheBall.W, 
+        State.TheBall.H 
+    };
+    if (Collide_AABB(BallRect, State.ThePaddle))
     {
-        B.Vx = Calculate_Bounce(B, Paddle);
-        B.Vy = -sqrt(BALL_SPEED * BALL_SPEED - B.Vx * B.Vx);
+        State.TheBall.Vx = Calculate_Bounce(State.TheBall, State.ThePaddle);
+        State.TheBall.Vy = -sqrt(BALL_SPEED * BALL_SPEED - State.TheBall.Vx * State.TheBall.Vx);
     }
 
     // Collision with bricks
     for(int i=0; i<NUM_BRICKS; i++)
     {
-        if (IsBrickActive[i])
+        if (State.IsBrickActive[i])
         {
-            if (Collide_AABB(BallRect, TheBricks[i]))
+            if (Collide_AABB(BallRect, State.TheBricks[i]))
             {
-                IsBrickActive[i] = false;
+                State.IsBrickActive[i] = false;
 
-                int BrickRight = TheBricks[i].x + TheBricks[i].w;
-                int BrickLeft = TheBricks[i].x;
-                int BallLeft = B.X;
-                int BallRight = B.X + B.W;
+                int BrickRight = State.TheBricks[i].x + State.TheBricks[i].w;
+                int BrickLeft = State.TheBricks[i].x;
+                int BallLeft = State.TheBall.X;
+                int BallRight = State.TheBall.X + State.TheBall.W;
                 // Right of brick
                 if ((BallLeft <= BrickRight) && (BallRight > BrickRight))
                 {
-                    B.Vx = -B.Vx;
+                    State.TheBall.Vx = -State.TheBall.Vx;
                 }
                 // Left of brick
                 else if ((BallRight >= BrickLeft) && (BallLeft < BrickLeft))
                 {
-                    B.Vx = -B.Vx;
+                    State.TheBall.Vx = -State.TheBall.Vx;
                 }
                 else
                 {
-                    B.Vy = -B.Vy;
+                    State.TheBall.Vy = -State.TheBall.Vy;
                 }
             }
         }
     }
 
     // Collision with borders
-    if (B.X < 0)                 B.Vx = -B.Vx;
-    if (B.Y < 0 + BRICKS_TOPPAD) B.Vy = -B.Vy;
-    if (B.X + B.W >= WIN_WIDTH)  B.Vx = -B.Vx;
+    if (State.TheBall.X < 0)                                State.TheBall.Vx = -State.TheBall.Vx;
+    if (State.TheBall.Y < 0 + BRICKS_TOPPAD)                State.TheBall.Vy = -State.TheBall.Vy;
+    if (State.TheBall.X + State.TheBall.W >= WIN_WIDTH)     State.TheBall.Vx = -State.TheBall.Vx;
 
     // Lose life and reset/game over
-    if (B.Y + B.H >= WIN_HEIGHT)
+    if (State.TheBall.Y + State.TheBall.H >= WIN_HEIGHT)
     {
         State.NumLives -= 1;
         State.IsDelaying = true;
         State.LastDelayTick = SDL_GetTicks();
-        B.X = WIN_WIDTH / 2;
-        B.Y = WIN_HEIGHT / 2 - 15;
-        B.Vx = 3;
-        B.Vy = 4;
+        State.TheBall.X = WIN_WIDTH / 2;
+        State.TheBall.Y = WIN_HEIGHT / 2 - 15;
+        State.TheBall.Vx = 3;
+        State.TheBall.Vy = 4;
     }
 
-    B.X += B.Vx;
-    B.Y += B.Vy;
+    State.TheBall.X += State.TheBall.Vx;
+    State.TheBall.Y += State.TheBall.Vy;
 }
 
 static void RenderLives(SDL_Renderer *Renderer, int NumLives)
@@ -195,19 +243,18 @@ static void RenderLives(SDL_Renderer *Renderer, int NumLives)
     }
 }
 
-static void Render(SDL_Renderer *Renderer, const Ball &B, const SDL_Rect &Paddle, 
-                   SDL_Rect *TheBricks, bool *IsBrickActive, const GameState &State)
+static void Render(SDL_Renderer *Renderer, const GameState &State)
 {
     SDL_SetRenderDrawColor(Renderer, 255, 255, 255, 0);
-    SDL_Rect BallRect = {B.X, B.Y, B.W, B.H};
+    SDL_Rect BallRect = {State.TheBall.X, State.TheBall.Y, State.TheBall.W, State.TheBall.H};
     SDL_RenderFillRect(Renderer, &BallRect);
-    SDL_RenderFillRect(Renderer, &Paddle);
+    SDL_RenderFillRect(Renderer, &State.ThePaddle);
 
     for(int i=0; i<NUM_BRICKS; i++)
     {
-        if (IsBrickActive[i])
+        if (State.IsBrickActive[i])
         {
-            SDL_RenderFillRect(Renderer, &TheBricks[i]);
+            SDL_RenderFillRect(Renderer, &State.TheBricks[i]);
         }
     }
 
@@ -224,40 +271,13 @@ int main()
 
     SDL_Renderer *Renderer = SDL_CreateRenderer(Window, -1, SDL_RENDERER_ACCELERATED);
 
+    GameState TheGameState;
+    InitializeGameState(TheGameState);
+
     int MouseX, MouseY;
 
     unsigned int MSPerFrame = 1.0f / GAME_HZ * 1000.0f;
     Uint32 LastTick = SDL_GetTicks();
-
-    GameState TheGameState;
-    TheGameState.IsRunning = true;
-    TheGameState.IsGameOver = false;
-    TheGameState.NumLives = 3;
-    TheGameState.IsDelaying = false;
-
-    Ball TheBall;
-    TheBall.X = WIN_WIDTH / 2;
-    TheBall.Y = WIN_HEIGHT / 2;
-    TheBall.W = 10;
-    TheBall.H = 10;
-    TheBall.Vx = 3;
-    TheBall.Vy = 3;
-
-    SDL_Rect ThePaddle = Make_Paddle();
-    BrickParams Params = Calculate_BrickParams(WIN_WIDTH, BRICKS_LEFTPAD, BRICKS_COLUMNS);
-    SDL_Rect TheBricks[NUM_BRICKS];
-    bool IsBrickActive[NUM_BRICKS]; 
-    for(int i=0; i<NUM_BRICKS; i++)
-    {
-        IsBrickActive[i] = true;
-
-        int row = i / BRICKS_COLUMNS;
-        int col = i % BRICKS_COLUMNS;
-        TheBricks[i].x = BRICKS_LEFTPAD + col * (Params.Width + BRICKS_PAD);
-        TheBricks[i].y = BRICKS_TOPPAD + row * (Params.Height + BRICKS_PAD);
-        TheBricks[i].w = Params.Width;
-        TheBricks[i].h = Params.Height;
-    }
 
     while (TheGameState.IsRunning)
     {
@@ -271,10 +291,6 @@ int main()
                     TheGameState.IsRunning = false;
                     break;
                 }
-                case SDL_MOUSEMOTION:
-                {
-                    SDL_GetMouseState(&MouseX, &MouseY);    
-                }
             }
         }
 
@@ -284,11 +300,14 @@ int main()
             break;
         }
 
-        Update(TheBall, ThePaddle, MouseX, TheBricks, IsBrickActive, TheGameState);
+        int Buttons = SDL_GetMouseState(&MouseX, &MouseY);
+        Update(TheGameState, MouseX);
 
         SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 0);
         SDL_RenderClear(Renderer);
-        Render(Renderer, TheBall, ThePaddle, TheBricks, IsBrickActive, TheGameState);
+
+        Render(Renderer, TheGameState);
+
         SDL_RenderPresent(Renderer);
 
         while ((SDL_GetTicks() - LastTick) <= MSPerFrame)
