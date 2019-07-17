@@ -13,8 +13,8 @@
 #define BALL_SPEED      6
 #define BALL_SPEED_XMAX 5
 
-#define BRICKS_ROWS     5
-#define BRICKS_COLUMNS  7
+#define BRICKS_ROWS     4
+#define BRICKS_COLUMNS  5
 #define NUM_BRICKS      BRICKS_ROWS * BRICKS_COLUMNS
 #define BRICKS_LEFTPAD  4
 #define BRICKS_TOPPAD   15
@@ -243,7 +243,13 @@ static void RenderLives(SDL_Renderer *Renderer, int NumLives)
     }
 }
 
-static void Render(SDL_Renderer *Renderer, const GameState &State)
+static void RenderGameOver(SDL_Renderer *Renderer)
+{
+    SDL_SetRenderDrawColor(Renderer, 255, 255, 255, 0);
+    SDL_RenderClear(Renderer);
+}
+
+static void RenderGame(SDL_Renderer *Renderer, const GameState &State)
 {
     SDL_SetRenderDrawColor(Renderer, 255, 255, 255, 0);
     SDL_Rect BallRect = {State.TheBall.X, State.TheBall.Y, State.TheBall.W, State.TheBall.H};
@@ -261,9 +267,28 @@ static void Render(SDL_Renderer *Renderer, const GameState &State)
     RenderLives(Renderer, State.NumLives);
 }
 
+static void Render(SDL_Renderer *Renderer, const GameState &State)
+{
+    SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 0);
+    SDL_RenderClear(Renderer);
+
+    if (State.IsGameOver)
+    {
+        RenderGameOver(Renderer);
+    }
+    else
+    {
+        RenderGame(Renderer, State);
+    }
+
+    SDL_RenderPresent(Renderer);
+}
+
 
 int main()
 {
+    SDL_Init(SDL_INIT_VIDEO);
+
     SDL_Window *Window = SDL_CreateWindow("Breakout",
                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                           WIN_WIDTH, WIN_HEIGHT,
@@ -276,11 +301,14 @@ int main()
 
     int MouseX, MouseY;
 
-    unsigned int MSPerFrame = 1.0f / GAME_HZ * 1000.0f;
+    float MSPerFrame = 1.0f / GAME_HZ * 1000.0f;
+    float ElapsedMS;
     Uint32 LastTick = SDL_GetTicks();
 
     while (TheGameState.IsRunning)
     {
+        ElapsedMS = (SDL_GetTicks() - LastTick);
+
         SDL_Event Event;
         while (SDL_PollEvent(&Event))
         {
@@ -293,30 +321,20 @@ int main()
                 }
             }
         }
+        SDL_GetMouseState(&MouseX, &MouseY);
 
-        if (TheGameState.IsGameOver)
+        if (ElapsedMS >= MSPerFrame)
         {
-            TheGameState.IsRunning = false;
-            break;
+            Update(TheGameState, MouseX);
+
+            Render(Renderer, TheGameState);
+
+            LastTick = SDL_GetTicks();
         }
-
-        int Buttons = SDL_GetMouseState(&MouseX, &MouseY);
-        Update(TheGameState, MouseX);
-
-        SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 0);
-        SDL_RenderClear(Renderer);
-
-        Render(Renderer, TheGameState);
-
-        SDL_RenderPresent(Renderer);
-
-        while ((SDL_GetTicks() - LastTick) <= MSPerFrame)
-        {
-            // Delay instead of spin locking?
-        }
-        LastTick = SDL_GetTicks();
     }
 
+    SDL_DestroyWindow(Window);
     SDL_Quit();
+
     return 0;
 }
